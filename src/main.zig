@@ -1,24 +1,46 @@
 const std = @import("std");
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+    defer gpa.deinit();
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+    const allocator = gpa.allocator();
 
-    try bw.flush(); // don't forget to flush!
+    if (std.os.argv.len != 2) {
+        std.debug.print("you can only have one positional argument which is the file path\n", .{});
+        std.process.exit(128);
+    }
+
+    const values = readFileLines(allocator, "build.zig");
+
+    std.debug.print("{s} \n", values);
+
+    allocator.free(values);
 }
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+fn readFileLines(gpa: std.mem.Allocator, path: []const u8) ![]const []const u8 {
+    const allocator = gpa.allocator();
+
+    const file = std.fs.cwd().readFile(path, .{}) catch |err| {
+        std.log.err("could not read file.. {s}\n", .{@errorName(err)});
+        return;
+    };
+
+    defer file.close();
+
+    // Read the file content into a buffer
+    const file_content = try file.readAllAlloc(allocator, std.math.maxInt(usize));
+    defer allocator.free(file_content);
+
+    // Split the content into lines
+    var lines = std.ArrayList([]const u8).init(allocator);
+    defer lines.deinit();
+
+    var tokenizer = std.mem.tokenize(file_content, "\n");
+    while (tokenizer.next()) |line| {
+        try lines.append(line);
+    }
+
+    return lines.toOwnedSlice();
 }
